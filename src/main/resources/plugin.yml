@@ -1,0 +1,39 @@
+name: ARM-Guilds-Bridge
+version: 1.0.0
+main: net.lumalyte.armbridge.ARMGuildsBridge
+api-version: '1.21'
+author: LumaLyte
+description: Integration bridge between Advanced Region Market and LumaGuilds for guild-owned shops
+
+# Plugin dependencies
+depend:
+  - LumaGuilds
+  - WorldGuard
+  - Vault
+
+# Soft dependencies (ARM will be added when available)
+softdepend:
+  - AdvancedRegionMarket
+
+# Commands
+commands:
+  guildshop:
+    description: Guild shop management commands
+    usage: |
+      /<command> info - Show shop info
+      /<command> setmode <BAN|UPCHARGE|WINDOW_SHOP|ALLOW> [upcharge%] - Set enemy access mode
+      /<command> help - Show help
+    permission: armbridge.guildshop.use
+    aliases: [gshop, gs]
+
+# Permissions
+permissions:
+  armbridge.guildshop.use:
+    description: Use guild shop commands
+    default: true
+  armbridge.guildshop.buy:
+    description: Purchase shop regions for guild
+    default: true
+  armbridge.guildshop.admin:
+    description: Administrative commands for guild shops
+    default: op
