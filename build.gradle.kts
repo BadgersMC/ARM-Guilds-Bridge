@@ -20,7 +20,7 @@ dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.1-R0.1-SNAPSHOT")
 
     // LumaGuilds (compile against the shadowJar which contains all LumaGuilds classes)
-    compileOnly(files("../bell-claims/build/libs/LumaGuilds-0.6.0.jar"))
+    compileOnly(files("../bell-claims/build/libs/LumaGuilds-2.0.0.jar"))
 
     // Koin (LumaGuilds uses Koin for DI - we need it to access services)
     compileOnly("io.insert-koin:koin-core:4.0.2")
@@ -37,6 +37,9 @@ dependencies {
 
     // Vault API
     compileOnly("com.github.MilkBowl:VaultAPI:1.7.1")
+
+    // ItemShops (for shop transaction events)
+    compileOnly(files("../ItemShops/build/libs/ItemShops-1.1.1.jar"))
 
     // Logging
     implementation("org.slf4j:slf4j-api:2.0.9")
