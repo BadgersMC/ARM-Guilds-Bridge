@@ -236,7 +236,20 @@ public class RegionPurchaseListener implements Listener, EventExecutor {
             );
 
             if (!registered) {
-                plugin.getLogger().warning("Failed to register shop region " + regionId + " for guild " + guild.getName());
+                plugin.getLogger().warning("Failed to register shop region " + regionId + " for guild " + guild.getName() + " — rolling back payment");
+                // Refund the guild vault since registration failed
+                boolean refunded = paymentService.depositToGuild(
+                    guild.getId(),
+                    price,
+                    "Refund: shop region registration failed for " + regionId
+                );
+                if (!refunded) {
+                    plugin.getLogger().severe("CRITICAL: Failed to refund " + price + " to guild " + guild.getName() +
+                        " after failed region registration! Manual intervention required.");
+                }
+                buyer.sendMessage("§cFailed to register shop region. Your guild vault has been refunded.");
+                method_setCancelled.invoke(event, true);
+                return;
             }
 
             // Update WorldGuard flags

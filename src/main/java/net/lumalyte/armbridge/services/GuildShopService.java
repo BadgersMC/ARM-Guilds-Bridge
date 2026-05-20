@@ -56,6 +56,14 @@ public interface GuildShopService {
     boolean removeGuildShopRegion(String regionId, String worldName);
 
     /**
+     * Remove all shop regions for a guild (e.g. on disband)
+     *
+     * @param guildId Guild UUID
+     * @return Number of regions removed
+     */
+    int removeAllForGuild(UUID guildId);
+
+    /**
      * Update enemy access mode for a shop region
      *
      * @param regionId ARM region ID

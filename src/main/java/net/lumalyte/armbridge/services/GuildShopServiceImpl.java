@@ -95,6 +95,26 @@ public class GuildShopServiceImpl implements GuildShopService {
     }
 
     @Override
+    public int removeAllForGuild(UUID guildId) {
+        int removed = repository.removeAllGuildShopRegions(guildId);
+
+        if (removed > 0) {
+            plugin.getLogger().info("Removed all " + removed + " shop region(s) for guild " + guildId);
+
+            repository.logShopTransaction(
+                guildId,
+                "ALL",
+                "BULK_REMOVAL",
+                0.0,
+                "All " + removed + " shop regions removed",
+                null
+            );
+        }
+
+        return removed;
+    }
+
+    @Override
     public boolean updateEnemyAccessMode(String regionId, String worldName,
                                         net.lumalyte.armbridge.models.EnemyAccessMode mode,
                                         double upchargePercentage) {

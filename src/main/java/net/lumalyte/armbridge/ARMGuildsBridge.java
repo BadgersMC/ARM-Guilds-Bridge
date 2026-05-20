@@ -37,6 +37,7 @@ public class ARMGuildsBridge extends JavaPlugin {
     private PaymentRoutingService paymentRoutingService;
     private RelationFlagService relationFlagService;
     private ItemShopGuildService itemShopGuildService;
+    private net.lumalyte.armbridge.services.PurchaseMode purchaseMode;
 
     @Override
     public void onEnable() {
@@ -59,6 +60,9 @@ public class ARMGuildsBridge extends JavaPlugin {
         // Initialize services
         initializeServices();
 
+        // Run migrations for pre-existing guilds
+        migratePreExistingGuilds();
+
         // Register listeners
         registerListeners();
 
@@ -74,21 +78,20 @@ public class ARMGuildsBridge extends JavaPlugin {
         logger.info("  - BAN mode (enemies completely blocked)");
         logger.info("  - WINDOW_SHOP mode (enemies view but can't buy)");
         logger.info("  - ALLOW mode (full enemy access)");
+        logger.info("  - UPCHARGE mode (automatic price modification for enemies)");
+        logger.info("  - PHYSICAL mode (shop income routing to guild vaults)");
         logger.info("  - Shop permissions (chest access, inventory, signs)");
         logger.info("  - Player commands (/guildshop)");
         logger.info("");
-        logger.warning("⚠ NOT READY YET (waiting for ItemShops source code):");
-        logger.warning("  - UPCHARGE mode automatic price modification");
-        logger.warning("    → Currently shows warnings only, doesn't modify prices");
-        logger.warning("  - PHYSICAL mode shop income routing");
-        logger.warning("    → Use VIRTUAL mode for now");
-        logger.info("");
-        logger.info("See ITEMSHOPS-FORK-REQUIREMENTS.md for details");
         logger.info("=================================================");
     }
 
     @Override
     public void onDisable() {
+        // Close database connection
+        if (guildRegionRepository instanceof GuildRegionRepositoryImpl) {
+            ((GuildRegionRepositoryImpl) guildRegionRepository).close();
+        }
         logger.info("ARM-Guilds-Bridge disabled.");
     }
 
@@ -170,25 +173,49 @@ public class ARMGuildsBridge extends JavaPlugin {
         );
         logger.info("Initialized PaymentRoutingService");
 
-        // Initialize RelationFlagService (stub for now)
+        // Initialize RelationFlagService
         relationFlagService = new net.lumalyte.armbridge.services.RelationFlagServiceImpl(this);
-        logger.info("Initialized RelationFlagService (stub - WorldGuard integration pending)");
+        if (net.lumalyte.armbridge.services.RelationFlagServiceImpl.BLOCKED_GUILDS_FLAG != null) {
+            logger.info("Initialized RelationFlagService with WorldGuard integration");
+        } else {
+            logger.warning("Initialized RelationFlagService in stub mode - WorldGuard flag registration failed");
+        }
 
         // Initialize ItemShopGuildService
         itemShopGuildService = new net.lumalyte.armbridge.services.ItemShopGuildServiceImpl(this);
         logger.info("Initialized ItemShopGuildService");
+
+        // Initialize PurchaseMode
+        purchaseMode = new net.lumalyte.armbridge.services.PurchaseMode();
+        logger.info("Initialized PurchaseMode service");
     }
 
     /**
      * Register event listeners
      */
     private void registerListeners() {
-        // Register region purchase listener (hooks into ARM PreBuyEvent)
-        getServer().getPluginManager().registerEvents(
-            new net.lumalyte.armbridge.listeners.RegionPurchaseListener(this),
-            this
-        );
-        logger.info("Registered RegionPurchaseListener");
+        // Register region purchase listener (hooks into ARM PreBuyEvent) using dynamic registration
+        try {
+            net.lumalyte.armbridge.listeners.RegionPurchaseListener purchaseListener =
+                new net.lumalyte.armbridge.listeners.RegionPurchaseListener(this, purchaseMode);
+
+            // Get ARM's PreBuyEvent class
+            Class<?> preBuyEventClass = Class.forName("net.alex9849.arm.events.PreBuyEvent");
+
+            // Register using EventExecutor to avoid classloader issues
+            getServer().getPluginManager().registerEvent(
+                preBuyEventClass.asSubclass(org.bukkit.event.Event.class),
+                purchaseListener,
+                org.bukkit.event.EventPriority.HIGH,
+                purchaseListener,
+                this,
+                false
+            );
+            logger.info("Registered RegionPurchaseListener using dynamic event registration");
+        } catch (Exception e) {
+            logger.severe("Failed to register RegionPurchaseListener: " + e.getMessage());
+            e.printStackTrace();
+        }
 
         // Register permission enforcement listeners
         getServer().getPluginManager().registerEvents(
@@ -230,23 +257,26 @@ public class ARMGuildsBridge extends JavaPlugin {
         );
         logger.info("Registered ShopSignInteractionListener");
 
-        // Register shop transaction listener (UPCHARGE mode - requires ItemShops fork)
+        // Register shop transaction listener (UPCHARGE mode)
         getServer().getPluginManager().registerEvents(
             new net.lumalyte.armbridge.listeners.ShopTransactionListener(this),
             this
         );
-        logger.warning("Registered ShopTransactionListener - UPCHARGE mode NOT READY YET");
-        logger.warning("Waiting for ItemShops source code to add PreShopTransactionEvent");
-        logger.warning("Current status: UPCHARGE shows warnings but cannot auto-modify prices");
+        logger.info("Registered ShopTransactionListener (UPCHARGE mode)");
 
-        // Register shop income listener (PHYSICAL mode income routing - requires ItemShops fork)
+        // Register shop income listener (PHYSICAL mode income routing)
         getServer().getPluginManager().registerEvents(
             new net.lumalyte.armbridge.listeners.ShopIncomeListener(this),
             this
         );
-        logger.warning("Registered ShopIncomeListener - PHYSICAL mode income routing NOT READY YET");
-        logger.warning("Waiting for ItemShops source code to add PostShopTransactionEvent");
-        logger.warning("Current status: Use VIRTUAL mode for shop income (PHYSICAL mode won't convert to RAW_GOLD)");
+        logger.info("Registered ShopIncomeListener (PHYSICAL mode)");
+
+        // Register guild disband cleanup listener
+        getServer().getPluginManager().registerEvents(
+            new net.lumalyte.armbridge.listeners.GuildDisbandListener(this),
+            this
+        );
+        logger.info("Registered GuildDisbandListener (shop cleanup on disband)");
     }
 
     /**
@@ -305,5 +335,83 @@ public class ARMGuildsBridge extends JavaPlugin {
 
     public ItemShopGuildService getItemShopGuildService() {
         return itemShopGuildService;
+    }
+
+    public net.lumalyte.armbridge.services.PurchaseMode getPurchaseMode() {
+        return purchaseMode;
+    }
+
+    /**
+     * Migrate pre-existing guilds to ensure Owner ranks have MANAGE_GUILD_SETTINGS permission.
+     * This is needed for guilds created before the permission was added to support shop purchases.
+     */
+    private void migratePreExistingGuilds() {
+        logger.info("Checking for guilds needing MANAGE_GUILD_SETTINGS permission migration...");
+
+        try {
+            // Use the already-loaded services
+            java.util.Set<net.lumalyte.lg.domain.entities.Guild> allGuilds = guildService.getAllGuilds();
+            int migratedCount = 0;
+
+            // Define all required shop permissions
+            java.util.Set<net.lumalyte.lg.domain.entities.RankPermission> requiredShopPermissions = new java.util.HashSet<>();
+            requiredShopPermissions.add(net.lumalyte.lg.domain.entities.RankPermission.MANAGE_GUILD_SETTINGS);
+            requiredShopPermissions.add(net.lumalyte.lg.domain.entities.RankPermission.ACCESS_SHOP_CHESTS);
+            requiredShopPermissions.add(net.lumalyte.lg.domain.entities.RankPermission.EDIT_SHOP_STOCK);
+            requiredShopPermissions.add(net.lumalyte.lg.domain.entities.RankPermission.MODIFY_SHOP_PRICES);
+
+            for (net.lumalyte.lg.domain.entities.Guild guild : allGuilds) {
+                // Get the highest rank (Owner rank) for this guild
+                net.lumalyte.lg.domain.entities.Rank ownerRank = rankService.getHighestRank(guild.getId());
+
+                if (ownerRank != null) {
+                    // Check which shop permissions are missing
+                    java.util.Set<net.lumalyte.lg.domain.entities.RankPermission> missingPermissions = new java.util.HashSet<>();
+                    for (net.lumalyte.lg.domain.entities.RankPermission perm : requiredShopPermissions) {
+                        if (!ownerRank.getPermissions().contains(perm)) {
+                            missingPermissions.add(perm);
+                        }
+                    }
+
+                    if (!missingPermissions.isEmpty()) {
+                        logger.info("Guild '" + guild.getName() + "' - Owner rank '" + ownerRank.getName() +
+                            "' is missing " + missingPermissions.size() + " shop permission(s): " + missingPermissions);
+
+                        // Add missing permissions
+                        java.util.Set<net.lumalyte.lg.domain.entities.RankPermission> updatedPermissions =
+                            new java.util.HashSet<>(ownerRank.getPermissions());
+                        updatedPermissions.addAll(missingPermissions);
+
+                        net.lumalyte.lg.domain.entities.Rank updatedRank = new net.lumalyte.lg.domain.entities.Rank(
+                            ownerRank.getId(),
+                            ownerRank.getGuildId(),
+                            ownerRank.getName(),
+                            ownerRank.getPriority(),
+                            updatedPermissions,
+                            ownerRank.getIcon()
+                        );
+
+                        if (rankService.updateRank(updatedRank, guild.getId())) {
+                            migratedCount++;
+                            logger.info("Added shop permissions to Owner rank for guild: " + guild.getName());
+                        }
+                    } else {
+                        logger.info("Guild '" + guild.getName() + "' - Owner rank already has all shop permissions");
+                    }
+                } else {
+                    logger.warning("Guild '" + guild.getName() + "' has no owner rank!");
+                }
+            }
+
+            if (migratedCount > 0) {
+                logger.info("Successfully migrated " + migratedCount + " guild(s) to have all shop permissions");
+            } else {
+                logger.info("No guilds needed migration - all Owner ranks already have shop permissions");
+            }
+
+        } catch (Exception e) {
+            logger.warning("Error during guild permission migration: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
 }

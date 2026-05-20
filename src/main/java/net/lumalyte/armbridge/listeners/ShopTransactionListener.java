@@ -1,6 +1,6 @@
 package net.lumalyte.armbridge.listeners;
 
-import net.alex9849.arm.events.PreShopTransactionEvent;
+import dev.enthusia.itemshops.events.PreShopTransactionEvent;
 import net.lumalyte.armbridge.ARMGuildsBridge;
 import net.lumalyte.armbridge.models.EnemyAccessMode;
 import net.lumalyte.armbridge.services.RelationFlagService;
