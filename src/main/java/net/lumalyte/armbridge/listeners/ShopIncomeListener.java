@@ -1,6 +1,6 @@
 package net.lumalyte.armbridge.listeners;
 
-import net.alex9849.arm.events.PostShopTransactionEvent;
+import dev.enthusia.itemshops.events.PostShopTransactionEvent;
 import net.lumalyte.armbridge.ARMGuildsBridge;
 import net.lumalyte.armbridge.storage.GuildRegionRepository;
 import net.lumalyte.armbridge.storage.ShopRegionInfo;
@@ -39,7 +39,13 @@ public class ShopIncomeListener implements Listener {
         this.repository = plugin.getGuildRegionRepository();
 
         // Get Vault economy provider
-        this.economy = Bukkit.getServer().getServicesManager().getRegistration(Economy.class).getProvider();
+        var economyRegistration = Bukkit.getServer().getServicesManager().getRegistration(Economy.class);
+        if (economyRegistration != null) {
+            this.economy = economyRegistration.getProvider();
+        } else {
+            plugin.getLogger().warning("No economy provider found! Shop income routing will not function.");
+            this.economy = null;
+        }
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)

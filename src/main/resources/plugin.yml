@@ -2,6 +2,7 @@ name: ARM-Guilds-Bridge
 version: 1.0.0
 main: net.lumalyte.armbridge.ARMGuildsBridge
 api-version: '1.21'
+load: STARTUP
 author: LumaLyte
 description: Integration bridge between Advanced Region Market and LumaGuilds for guild-owned shops
 
