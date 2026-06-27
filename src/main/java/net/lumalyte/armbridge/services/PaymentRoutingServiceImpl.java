@@ -5,8 +5,12 @@ import net.lumalyte.armbridge.storage.GuildRegionRepository;
 import net.lumalyte.lg.application.services.GuildVaultService;
 import net.lumalyte.lg.application.services.VaultResult;
 import net.lumalyte.lg.application.services.WithdrawalInfo;
+import net.lumalyte.lg.domain.entities.BankMode;
 import net.lumalyte.lg.domain.entities.Guild;
+import org.bukkit.Material;
+import org.bukkit.inventory.ItemStack;
 
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -37,6 +41,13 @@ public class PaymentRoutingServiceImpl implements PaymentRoutingService {
                 return WithdrawalResult.failure("Guild not found");
             }
 
+            BankMode bankMode = resolveBankMode();
+            if (wouldViolateMinimumBalance(guild, amount, bankMode)) {
+                return WithdrawalResult.failure(
+                    "Withdrawal would leave guild balance below minimum required (" + minimumBalanceAfter + ")"
+                );
+            }
+
             // Call LumaGuilds' withdrawForShopPurchase method
             VaultResult<WithdrawalInfo> result = vaultService.withdrawForShopPurchase(guild, amount, reason);
 
@@ -44,13 +55,6 @@ public class PaymentRoutingServiceImpl implements PaymentRoutingService {
                 @SuppressWarnings("unchecked")
                 VaultResult.Success<WithdrawalInfo> success = (VaultResult.Success<WithdrawalInfo>) result;
                 WithdrawalInfo info = success.getData();
-
-                // Check if remaining balance meets minimum requirement
-                if (info.getRemainingBalance() < minimumBalanceAfter) {
-                    plugin.getLogger().warning("Guild " + guild.getName() + " balance (" +
-                        info.getRemainingBalance() + ") below minimum (" + minimumBalanceAfter + ") after withdrawal");
-                    // Note: withdrawal already happened, this is just a warning
-                }
 
                 plugin.getLogger().info("Withdrew " + amount + " from guild " + guild.getName() +
                     " for: " + reason + " (remaining: " + info.getRemainingBalance() + ")");
@@ -118,5 +122,65 @@ public class PaymentRoutingServiceImpl implements PaymentRoutingService {
             e.printStackTrace();
             return false;
         }
+    }
+
+    /**
+     * Resolve bank mode from LumaGuilds config (same source as GuildVaultService).
+     */
+    private BankMode resolveBankMode() {
+        org.bukkit.plugin.Plugin lumaGuildsPlugin = plugin.getServer().getPluginManager().getPlugin("LumaGuilds");
+        String bankModeStr = "BOTH";
+        if (lumaGuildsPlugin != null) {
+            bankModeStr = lumaGuildsPlugin.getConfig().getString("vault.bank_mode", "BOTH");
+        }
+        try {
+            return BankMode.valueOf(bankModeStr.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            plugin.getLogger().warning("Invalid bank mode '" + bankModeStr + "', defaulting to BOTH");
+            return BankMode.BOTH;
+        }
+    }
+
+    private boolean wouldViolateMinimumBalance(Guild guild, double amount, BankMode bankMode) {
+        switch (bankMode) {
+            case VIRTUAL: {
+                double balance = guild.getBankBalance();
+                return (balance - amount) < minimumBalanceAfter;
+            }
+            case PHYSICAL: {
+                double balance = getPhysicalBalance(guild);
+                return balance < amount || (balance - amount) < minimumBalanceAfter;
+            }
+            case BOTH: {
+                double virtualBalance = guild.getBankBalance();
+                if (virtualBalance >= amount) {
+                    return (virtualBalance - amount) < minimumBalanceAfter;
+                }
+                double physicalBalance = getPhysicalBalance(guild);
+                return physicalBalance < amount || (physicalBalance - amount) < minimumBalanceAfter;
+            }
+            default:
+                return false;
+        }
+    }
+
+    private double getPhysicalBalance(Guild guild) {
+        Map<Integer, ItemStack> inventory = vaultService.getVaultInventory(guild);
+        return calculateRawGoldValue(inventory);
+    }
+
+    private double calculateRawGoldValue(Map<Integer, ItemStack> inventory) {
+        int total = 0;
+        for (ItemStack item : inventory.values()) {
+            if (item == null) {
+                continue;
+            }
+            if (item.getType() == Material.RAW_GOLD_BLOCK) {
+                total += item.getAmount() * 9;
+            } else if (item.getType() == Material.RAW_GOLD) {
+                total += item.getAmount();
+            }
+        }
+        return total;
     }
 }

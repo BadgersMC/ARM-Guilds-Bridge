@@ -14,12 +14,11 @@ import net.lumalyte.lg.domain.entities.Rank;
 import net.lumalyte.lg.domain.entities.RankPermission;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
-import org.bukkit.event.EventPriority;
-import org.bukkit.event.HandlerList;
 import org.bukkit.event.Listener;
 import org.bukkit.plugin.EventExecutor;
 
 import java.lang.reflect.Method;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -55,6 +54,8 @@ public class RegionPurchaseListener implements Listener, EventExecutor {
     private Method method_getPricePerPeriod;
     private Method method_setLandlord;
 
+    private boolean disabled;
+
     public RegionPurchaseListener(ARMGuildsBridge plugin, PurchaseMode purchaseMode) {
         this.plugin = plugin;
         this.guildService = plugin.getGuildService();
@@ -83,6 +84,7 @@ public class RegionPurchaseListener implements Listener, EventExecutor {
             org.bukkit.plugin.Plugin armPlugin = plugin.getServer().getPluginManager().getPlugin("AdvancedRegionMarket");
             if (armPlugin == null) {
                 plugin.getLogger().severe("ARM plugin not found! Cannot initialize reflection.");
+                disabled = true;
                 return;
             }
             ClassLoader armClassLoader = armPlugin.getClass().getClassLoader();
@@ -111,6 +113,11 @@ public class RegionPurchaseListener implements Listener, EventExecutor {
         } catch (Exception e) {
             plugin.getLogger().severe("Failed to initialize ARM reflection: " + e.getMessage());
             e.printStackTrace();
+            disabled = true;
+        }
+
+        if (class_PreBuyEvent == null) {
+            disabled = true;
         }
     }
 
@@ -119,6 +126,10 @@ public class RegionPurchaseListener implements Listener, EventExecutor {
      */
     @Override
     public void execute(Listener listener, Event event) {
+        if (disabled || class_PreBuyEvent == null) {
+            return;
+        }
+
         // Validate event type using reflection
         if (!class_PreBuyEvent.isInstance(event)) {
             return;
@@ -151,19 +162,48 @@ public class RegionPurchaseListener implements Listener, EventExecutor {
             double price = (Double) method_getPricePerPeriod.invoke(armRegion);
 
             // Check if player is in a guild
-            java.util.Set<UUID> playerGuilds = memberService.getPlayerGuilds(buyer.getUniqueId());
+            Set<UUID> playerGuilds = memberService.getPlayerGuilds(buyer.getUniqueId());
 
             if (playerGuilds.isEmpty()) {
                 // Not in a guild - let ARM handle normally (personal purchase)
                 return;
             }
 
-            // Player is in a guild
+            // Multi-guild: require explicit guild selection for guild purchases
+            if (playerGuilds.size() > 1) {
+                PurchaseMode.PurchaseModeChoice pendingChoice = purchaseMode.consumePurchaseMode(buyer.getUniqueId());
+                if (pendingChoice == null) {
+                    method_setCancelled.invoke(event, true);
+                    buyer.sendMessage("§cYou are in multiple guilds. Specify which guild to purchase for:");
+                    buyer.sendMessage("§f/guildshop purchasemode guild <guildname> §7- Guild vault purchase");
+                    buyer.sendMessage("§f/guildshop purchasemode personal §7- Personal purchase");
+                    buyer.sendMessage("§7Then run your §e/arm buy §7command again.");
+                    return;
+                }
+                if (!pendingChoice.isGuildMode()) {
+                    return;
+                }
+                if (pendingChoice.getGuildId() == null) {
+                    method_setCancelled.invoke(event, true);
+                    buyer.sendMessage("§cYou are in multiple guilds. Specify which guild to purchase for:");
+                    buyer.sendMessage("§f/guildshop purchasemode guild <guildname>");
+                    return;
+                }
+                if (!playerGuilds.contains(pendingChoice.getGuildId())) {
+                    method_setCancelled.invoke(event, true);
+                    buyer.sendMessage("§cThe selected guild is not one of your guilds!");
+                    return;
+                }
+                processGuildPurchase(event, buyer, armRegion, regionId, worldName, price, pendingChoice.getGuildId());
+                return;
+            }
+
+            // Single guild
             UUID guildId = playerGuilds.iterator().next();
             boolean hasGuildPerms = hasShopPurchasePermission(buyer.getUniqueId(), guildId);
 
             // Check if player has chosen a purchase mode
-            Boolean chosenMode = purchaseMode.consumePurchaseMode(buyer.getUniqueId());
+            PurchaseMode.PurchaseModeChoice chosenMode = purchaseMode.consumePurchaseMode(buyer.getUniqueId());
 
             if (chosenMode == null) {
                 // No mode chosen yet
@@ -178,13 +218,35 @@ public class RegionPurchaseListener implements Listener, EventExecutor {
                 return;
             }
 
-            if (!chosenMode) {
+            if (!chosenMode.isGuildMode()) {
                 // Player explicitly chose PERSONAL mode - let ARM handle it normally
                 return;
             }
 
-            // Player wants guild purchase - validate and process
-            if (!hasGuildPerms) {
+            UUID selectedGuildId = chosenMode.getGuildId() != null ? chosenMode.getGuildId() : guildId;
+            processGuildPurchase(event, buyer, armRegion, regionId, worldName, price, selectedGuildId);
+
+        } catch (Exception e) {
+            plugin.getLogger().severe("Error handling PreBuyEvent: " + e.getMessage());
+            e.printStackTrace();
+            try {
+                method_setCancelled.invoke(event, true);
+            } catch (Exception cancelEx) {
+                plugin.getLogger().severe("Failed to cancel PreBuyEvent after error: " + cancelEx.getMessage());
+            }
+        }
+    }
+
+    private void processGuildPurchase(Event event, Player buyer, Object armRegion, String regionId,
+                                      String worldName, double price, UUID guildId) throws Exception {
+        double withdrawnAmount = 0;
+        UUID guildIdForRefund = null;
+        boolean landlordSet = false;
+        boolean registered = false;
+        UUID buyerUuid = buyer.getUniqueId();
+
+        try {
+            if (!hasShopPurchasePermission(buyer.getUniqueId(), guildId)) {
                 buyer.sendMessage("§cYou don't have permission to purchase regions for your guild!");
                 buyer.sendMessage("§7Required permission: §e" + requiredPermission);
                 method_setCancelled.invoke(event, true);
@@ -224,11 +286,11 @@ public class RegionPurchaseListener implements Listener, EventExecutor {
                 return;
             }
 
-            // Set guild as landlord
-            method_setLandlord.invoke(armRegion, guild.getId());
+            withdrawnAmount = price;
+            guildIdForRefund = guild.getId();
 
-            // Register shop region in database
-            boolean registered = shopService.registerGuildShopRegion(
+            // Register shop region in database before setting landlord
+            registered = shopService.registerGuildShopRegion(
                 regionId,
                 worldName,
                 guild.getId(),
@@ -237,20 +299,16 @@ public class RegionPurchaseListener implements Listener, EventExecutor {
 
             if (!registered) {
                 plugin.getLogger().warning("Failed to register shop region " + regionId + " for guild " + guild.getName() + " — rolling back payment");
-                // Refund the guild vault since registration failed
-                boolean refunded = paymentService.depositToGuild(
-                    guild.getId(),
-                    price,
-                    "Refund: shop region registration failed for " + regionId
-                );
-                if (!refunded) {
-                    plugin.getLogger().severe("CRITICAL: Failed to refund " + price + " to guild " + guild.getName() +
-                        " after failed region registration! Manual intervention required.");
-                }
+                rollbackGuildPurchase(withdrawnAmount, guildIdForRefund, false, buyerUuid, armRegion,
+                    false, regionId, worldName);
                 buyer.sendMessage("§cFailed to register shop region. Your guild vault has been refunded.");
                 method_setCancelled.invoke(event, true);
                 return;
             }
+
+            // Set guild as landlord after successful registration
+            method_setLandlord.invoke(armRegion, guild.getId());
+            landlordSet = true;
 
             // Update WorldGuard flags
             flagService.updateShopRegionFlags(regionId, worldName, guild.getId());
@@ -274,8 +332,40 @@ public class RegionPurchaseListener implements Listener, EventExecutor {
             }
 
         } catch (Exception e) {
-            plugin.getLogger().severe("Error handling PreBuyEvent: " + e.getMessage());
+            plugin.getLogger().severe("Error during guild purchase for region " + regionId + ": " + e.getMessage());
             e.printStackTrace();
+            rollbackGuildPurchase(withdrawnAmount, guildIdForRefund, landlordSet, buyerUuid, armRegion,
+                registered, regionId, worldName);
+            method_setCancelled.invoke(event, true);
+            buyer.sendMessage("§cAn error occurred during guild shop purchase. Any charges have been refunded.");
+        }
+    }
+
+    private void rollbackGuildPurchase(double withdrawnAmount, UUID guildIdForRefund, boolean landlordSet,
+                                       UUID buyerUuid, Object armRegion, boolean registered,
+                                       String regionId, String worldName) {
+        if (withdrawnAmount > 0 && guildIdForRefund != null) {
+            boolean refunded = paymentService.depositToGuild(
+                guildIdForRefund,
+                withdrawnAmount,
+                "Refund: shop region purchase rollback for " + regionId
+            );
+            if (!refunded) {
+                plugin.getLogger().severe("CRITICAL: Failed to refund " + withdrawnAmount + " to guild " +
+                    guildIdForRefund + " after purchase rollback! Manual intervention required.");
+            }
+        }
+
+        if (landlordSet && buyerUuid != null && armRegion != null) {
+            try {
+                method_setLandlord.invoke(armRegion, buyerUuid);
+            } catch (Exception revertEx) {
+                plugin.getLogger().severe("Failed to revert landlord to buyer after registration failure!");
+            }
+        }
+
+        if (registered && regionId != null && worldName != null) {
+            shopService.removeGuildShopRegion(regionId, worldName);
         }
     }
 

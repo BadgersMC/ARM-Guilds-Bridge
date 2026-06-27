@@ -234,7 +234,21 @@ public class GuildShopCommand implements CommandExecutor, TabCompleter {
                     return true;
                 }
 
-                plugin.getPurchaseMode().enableGuildMode(player.getUniqueId());
+                UUID guildId;
+                if (playerGuilds.size() == 1) {
+                    guildId = playerGuilds.iterator().next();
+                } else if (args.length >= 3) {
+                    guildId = resolveGuildIdByName(player, args[2], playerGuilds);
+                    if (guildId == null) {
+                        return true;
+                    }
+                } else {
+                    player.sendMessage("§cYou are in multiple guilds. Specify which guild:");
+                    player.sendMessage("§f/guildshop purchasemode guild <guildname>");
+                    return true;
+                }
+
+                plugin.getPurchaseMode().enableGuildMode(player.getUniqueId(), guildId);
                 player.sendMessage("§a✓ Purchase mode set to GUILD");
                 player.sendMessage("§7Your next ARM region purchase will use your guild vault.");
                 player.sendMessage("§7Now run your §e/arm buy §7command again.");
@@ -248,6 +262,11 @@ public class GuildShopCommand implements CommandExecutor, TabCompleter {
         }
     }
 
+    /**
+     * Converts a player's personally-owned ARM stall into a guild shop.
+     * Admin-intentional bypass: this path deliberately skips PreBuyEvent / guild-vault
+     * withdrawal and only reassigns landlord + DB registration for already-owned regions.
+     */
     private boolean handleConvert(Player player) {
         // Check if player is in a guild
         Set<UUID> playerGuilds = memberService.getPlayerGuilds(player.getUniqueId());
@@ -403,6 +422,17 @@ public class GuildShopCommand implements CommandExecutor, TabCompleter {
             player.sendMessage("§cAn error occurred while converting the shop!");
             return true;
         }
+    }
+
+    private UUID resolveGuildIdByName(Player player, String guildName, Set<UUID> playerGuilds) {
+        for (UUID candidateId : playerGuilds) {
+            net.lumalyte.lg.domain.entities.Guild guild = plugin.getGuildService().getGuild(candidateId);
+            if (guild != null && guild.getName().equalsIgnoreCase(guildName)) {
+                return candidateId;
+            }
+        }
+        player.sendMessage("§cGuild not found or you are not a member: §f" + guildName);
+        return null;
     }
 
     /**

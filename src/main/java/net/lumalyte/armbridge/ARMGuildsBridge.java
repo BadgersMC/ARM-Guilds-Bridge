@@ -199,8 +199,14 @@ public class ARMGuildsBridge extends JavaPlugin {
             net.lumalyte.armbridge.listeners.RegionPurchaseListener purchaseListener =
                 new net.lumalyte.armbridge.listeners.RegionPurchaseListener(this, purchaseMode);
 
-            // Get ARM's PreBuyEvent class
-            Class<?> preBuyEventClass = Class.forName("net.alex9849.arm.events.PreBuyEvent");
+            // Get ARM's PreBuyEvent class using ARM plugin classloader (avoids classloader mismatch)
+            org.bukkit.plugin.Plugin armPlugin = getServer().getPluginManager().getPlugin("AdvancedRegionMarket");
+            if (armPlugin == null) {
+                logger.severe("ARM plugin not found! Cannot register RegionPurchaseListener.");
+                return;
+            }
+            ClassLoader armClassLoader = armPlugin.getClass().getClassLoader();
+            Class<?> preBuyEventClass = Class.forName("net.alex9849.arm.events.PreBuyEvent", true, armClassLoader);
 
             // Register using EventExecutor to avoid classloader issues
             getServer().getPluginManager().registerEvent(

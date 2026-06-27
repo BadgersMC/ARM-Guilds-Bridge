@@ -21,28 +21,54 @@ public class PurchaseMode {
 
     private static final long MODE_TIMEOUT_MS = 60000; // 1 minute timeout
 
+    /**
+     * Result of consuming a player's purchase mode choice.
+     */
+    public static class PurchaseModeChoice {
+        private final boolean guildMode;
+        private final UUID guildId;
+
+        public PurchaseModeChoice(boolean guildMode, UUID guildId) {
+            this.guildMode = guildMode;
+            this.guildId = guildId;
+        }
+
+        public boolean isGuildMode() {
+            return guildMode;
+        }
+
+        /**
+         * Selected guild for guild-mode purchases; null for personal mode.
+         */
+        public UUID getGuildId() {
+            return guildId;
+        }
+    }
+
     private static class ModeChoice {
         final boolean isGuildMode;
+        final UUID guildId;
         final long timestamp;
 
-        ModeChoice(boolean isGuildMode) {
+        ModeChoice(boolean isGuildMode, UUID guildId) {
             this.isGuildMode = isGuildMode;
+            this.guildId = guildId;
             this.timestamp = System.currentTimeMillis();
         }
     }
 
     /**
-     * Enable guild purchase mode for player
+     * Enable guild purchase mode for player with explicit guild selection.
      */
-    public void enableGuildMode(UUID playerId) {
-        playerChoices.put(playerId, new ModeChoice(true));
+    public void enableGuildMode(UUID playerId, UUID guildId) {
+        playerChoices.put(playerId, new ModeChoice(true, guildId));
     }
 
     /**
      * Enable personal purchase mode for player (explicitly chosen)
      */
     public void enablePersonalMode(UUID playerId) {
-        playerChoices.put(playerId, new ModeChoice(false));
+        playerChoices.put(playerId, new ModeChoice(false, null));
     }
 
     /**
@@ -66,7 +92,7 @@ public class PurchaseMode {
     /**
      * Check if player has chosen a mode (returns null if no choice or expired)
      */
-    public Boolean consumePurchaseMode(UUID playerId) {
+    public PurchaseModeChoice consumePurchaseMode(UUID playerId) {
         ModeChoice choice = getActiveChoice(playerId);
         if (choice == null) {
             return null; // No choice made
@@ -75,7 +101,7 @@ public class PurchaseMode {
         // Remove choice after consumption
         playerChoices.remove(playerId);
 
-        return choice.isGuildMode ? Boolean.TRUE : Boolean.FALSE;
+        return new PurchaseModeChoice(choice.isGuildMode, choice.guildId);
     }
 
     /**
@@ -108,7 +134,7 @@ public class PurchaseMode {
         player.sendMessage("");
         player.sendMessage("§7Or type:");
         player.sendMessage("§f/guildshop purchasemode personal §7- Use your money");
-        player.sendMessage("§f/guildshop purchasemode guild §7- Use guild vault");
+        player.sendMessage("§f/guildshop purchasemode guild [guild] §7- Use guild vault");
         player.sendMessage("");
         player.sendMessage("§7Then §eclick the shop sign again §7to complete the purchase.");
         player.sendMessage("§8(Mode expires in 60 seconds)");

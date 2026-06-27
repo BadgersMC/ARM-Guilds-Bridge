@@ -86,6 +86,11 @@ public class ShopIncomeListener implements Listener {
         // PHYSICAL or BOTH mode - need to reroute through guild vault service
         // This ensures proper conversion to RAW_GOLD items
 
+        if (economy == null) {
+            plugin.getLogger().warning("Cannot reroute shop income - no economy provider available");
+            return;
+        }
+
         // Withdraw from Vault economy (where ItemShops deposited it)
         OfflinePlayer landlord = Bukkit.getOfflinePlayer(landlordId);
         if (!economy.has(landlord, pricePaid)) {
@@ -115,10 +120,18 @@ public class ShopIncomeListener implements Listener {
     }
 
     /**
-     * Get the bank mode for a guild from config
+     * Get the bank mode from LumaGuilds config (same source GuildVaultService uses),
+     * not the bridge plugin's local config.
      */
     private BankMode getBankMode(Guild guild) {
-        String bankModeStr = plugin.getConfig().getString("vault.bank-mode", "BOTH");
+        // Guild entity has no per-guild bank mode; resolve via LumaGuilds vault configuration
+        org.bukkit.plugin.Plugin lumaGuildsPlugin = plugin.getServer().getPluginManager().getPlugin("LumaGuilds");
+        String bankModeStr = "BOTH";
+        if (lumaGuildsPlugin != null) {
+            bankModeStr = lumaGuildsPlugin.getConfig().getString("vault.bank_mode", "BOTH");
+        } else {
+            plugin.getLogger().warning("LumaGuilds plugin not found when resolving bank mode for guild " + guild.getName());
+        }
         try {
             return BankMode.valueOf(bankModeStr.toUpperCase());
         } catch (IllegalArgumentException e) {
