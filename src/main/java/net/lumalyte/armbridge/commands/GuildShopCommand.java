@@ -81,21 +81,19 @@ public class GuildShopCommand implements CommandExecutor, TabCompleter {
 
     private void sendHelp(Player player) {
         player.sendMessage("§6§l=== Guild Shop Commands ===");
-        player.sendMessage("§e/guildshop info §7- Show info about the shop you're in");
-        player.sendMessage("§e/guildshop setmode <mode> [upcharge%] §7- Set enemy access mode");
-        player.sendMessage("§e/guildshop purchasemode <personal|guild> §7- Choose purchase mode");
-        player.sendMessage("§e/guildshop convert §7- Convert personal stall to guild stall");
+        player.sendMessage("§e/guildshop info §7- Show info about a legacy ARM guild shop");
+        player.sendMessage("§e/guildshop setmode <mode> [upcharge%] §7- Set enemy access mode (legacy ARM shops)");
+        player.sendMessage("§e/guildshop purchasemode <personal|guild> §7- Choose purchase mode (legacy ARM)");
+        player.sendMessage("§e/guildshop convert §7- Convert personal ARM shop to guild shop");
         player.sendMessage("");
-        player.sendMessage("§6Enemy Access Modes:");
-        player.sendMessage("  §eBAN §7- Enemies cannot enter the shop §a✓ READY");
-        player.sendMessage("  §eWINDOW_SHOP §7- Enemies can view but cannot purchase §a✓ READY");
-        player.sendMessage("  §eALLOW §7- Enemies have full access, no warnings §a✓ READY");
-        player.sendMessage("  §eUPCHARGE §7- Enemies pay extra (automatic pricing) §a✓ READY");
+        player.sendMessage("§6Guild Shops with EnthusiaMarket:");
+        player.sendMessage("§7Guild stalls are now managed via EnthusiaMarket:");
+        player.sendMessage("§e  Sneak + right-click §7a purchase sign to buy a stall for your guild");
+        player.sendMessage("§e  /em guildpolicy §7- Manage guild trade policies (tariffs, embargoes)");
+        player.sendMessage("§e  /em help guild-stalls §7- Full guild stall help");
         player.sendMessage("");
-        player.sendMessage("§7Examples:");
-        player.sendMessage("  §f/guildshop setmode BAN");
-        player.sendMessage("  §f/guildshop setmode WINDOW_SHOP");
-        player.sendMessage("  §f/guildshop setmode UPCHARGE 50");
+        player.sendMessage("§7Legacy ARM commands above only work with old ARM shop regions.");
+        player.sendMessage("§7New guild shops use §eEnthusiaMarket guild stalls§7 instead.");
     }
 
     private boolean handleInfo(Player player) {
@@ -222,7 +220,7 @@ public class GuildShopCommand implements CommandExecutor, TabCompleter {
                 plugin.getPurchaseMode().enablePersonalMode(player.getUniqueId());
                 player.sendMessage("§a✓ Purchase mode set to PERSONAL");
                 player.sendMessage("§7Your next ARM region purchase will use your personal money.");
-                player.sendMessage("§7Now run your §e/arm buy §7command again.");
+                player.sendMessage("§7Now run your legacy §e/arm buy §7command again.");
                 player.sendMessage("§8(Mode expires in 60 seconds)");
                 return true;
 
@@ -237,7 +235,7 @@ public class GuildShopCommand implements CommandExecutor, TabCompleter {
                 plugin.getPurchaseMode().enableGuildMode(player.getUniqueId());
                 player.sendMessage("§a✓ Purchase mode set to GUILD");
                 player.sendMessage("§7Your next ARM region purchase will use your guild vault.");
-                player.sendMessage("§7Now run your §e/arm buy §7command again.");
+                player.sendMessage("§7Now run your legacy §e/arm buy §7command again.");
                 player.sendMessage("§8(Mode expires in 60 seconds)");
                 return true;
 
@@ -380,10 +378,13 @@ public class GuildShopCommand implements CommandExecutor, TabCompleter {
             plugin.getRelationFlagService().updateShopRegionFlags(regionId, worldName, guildId);
 
             // Success!
-            player.sendMessage("§a✓ Successfully converted personal shop to guild shop!");
+            player.sendMessage("§a✓ Successfully converted personal ARM shop to guild shop!");
             player.sendMessage("§7Region: §e" + regionId);
-            player.sendMessage("§7This shop is now owned by your guild.");
+            player.sendMessage("§7This legacy ARM shop is now owned by your guild.");
             player.sendMessage("§7All future income will go to the guild vault.");
+            player.sendMessage("");
+            player.sendMessage("§7§oNote: For new guild shops, use EnthusiaMarket guild stalls.");
+            player.sendMessage("§7§oSneak+right-click a purchase sign to buy a stall for your guild.");
 
             // Notify guild members
             String message = "§6[Guild Shop] §e" + player.getName() +
